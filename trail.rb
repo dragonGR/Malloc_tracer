@@ -2,7 +2,7 @@
 
 require 'optparse'
 require 'pp'
-require 'address_2_symbol'
+require_relative 'address_2_symbol'
 
 mapfile = nil
 target = nil
@@ -17,12 +17,7 @@ unless mapfile.nil? ^ target.nil?
   exit
 end
 
-a2s = nil
-unless mapfile.nil?
-  File.open(mapfile) do |file|
-    a2s = Address_2_Symbol.new file
-  end
-end
+a2s = File.foreach(mapfile) { |line| Address_2_Symbol.new line } unless mapfile.nil?
 
 filename = ARGV[0]
 puts "reading '#{filename}' ..."
@@ -31,31 +26,23 @@ allocation = Struct.new(:address, :size, :callstack)
 
 arr = []
 
-File.open(filename) do |f|
-  f.each_line do |line|
-    line.chomp!
+File.foreach(filename) do |line|
+  type, address, size, *callstack = line.chomp.split(' ')
 
-    type, address, size, *callstack = line.split(' ')
-    if type == 'm'
-      arr.push(allocation.new(address, size, callstack))
-    elsif type == 'f'
-      idx = arr.rindex { |alloc| alloc.address == address}
-      if idx.nil?
-        puts "orphaned free found, but continue processing..."
-        next
-      end
-      
-      arr.delete_at idx
-    else
-      puts "Unknown operation type found: #{type}."
-    end
+  case type
+  when 'm'
+    arr.push(allocation.new(address, size, callstack))
+  when 'f'
+    idx = arr.rindex { |alloc| alloc.address == address }
+    next unless idx
+
+    arr.delete_at idx
+  else
+    puts "Unknown operation type found: #{type}."
   end
 end
 
-if arr.empty?
-  puts "no memory leaks found."
-  exit
-end
+exit puts "no memory leaks found." if arr.empty?
 
 size = arr.size
 puts "#{size} leaks found..."
@@ -71,7 +58,7 @@ arr.each_index do |idx|
 
   alloc.callstack.each do |caller|
     if target
-      output = `addr2line -Cife #{target} #{caller}`
+      output = IO.popen(["addr2line", "-Cife", target, caller]).read
       func, line = output.split
       puts "    #{caller} #{func} #{line}"
     else
